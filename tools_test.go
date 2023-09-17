@@ -59,7 +59,6 @@ func TestTools_UploadFiles(t *testing.T) {
 			defer wg.Done()
 
 			// create the form data field
-			//writer.WriteField("foo", "bar")
 			part, err := writer.CreateFormFile("file", "./testdata/img.png")
 			if err != nil {
 				t.Error(err)
@@ -154,4 +153,20 @@ func TestTools_UploadOneFile(t *testing.T) {
 			t.Errorf("%s: expected no error received", e.name)
 		}
 	}
+}
+
+func TestTools_CreateDirIfNotExist(t *testing.T) {
+	var testTools Tools
+
+	err := testTools.CreateDirIfNotExist("./testdata/myDir")
+	if err != nil {
+		t.Error(err)
+	}
+
+	err = testTools.CreateDirIfNotExist("./testdata/myDir")
+	if err != nil {
+		t.Error(err)
+	}
+	_ = os.Remove("./testdata/myDir")
+
 }
