@@ -1,6 +1,9 @@
 package toolkit
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
@@ -215,10 +218,168 @@ func TestTools_DownloadStaticFile(t *testing.T) {
 		t.Errorf("wrong content disposition of %s", res.Header["Content-Disposition"][0])
 	}
 
-	// _, err := ioutil.ReadAll(res.Body)
 	_, err := io.ReadAll(res.Body)
 	if err != nil {
 		t.Error(err)
+	}
+
+}
+
+var jsonTests = []struct {
+	name          string
+	json          string
+	errorExpected bool
+	maxSize       int
+	allowUnknown  bool
+}{
+	{
+		name:          "Valid JSON",
+		json:          `{"foo":"bar"}`,
+		errorExpected: false,
+		maxSize:       1024,
+		allowUnknown:  false,
+	},
+	{
+		name:          "badly formatted JSON",
+		json:          `{"foo":`,
+		errorExpected: true,
+		maxSize:       1024,
+		allowUnknown:  false,
+	},
+	{
+		name:          "incorrect type",
+		json:          `{"foo": 1}`,
+		errorExpected: true,
+		maxSize:       1024,
+		allowUnknown:  false,
+	},
+	{
+		name:          "two json files",
+		json:          `{"foo": "1"}{"alpha": "beta"}`,
+		errorExpected: true,
+		maxSize:       1024,
+		allowUnknown:  false,
+	},
+	{
+		name:          "empty body",
+		json:          ``,
+		errorExpected: true,
+		maxSize:       1024,
+		allowUnknown:  false,
+	},
+	{
+		name:          "syntax error in json",
+		json:          `{"foo": 1`,
+		errorExpected: true,
+		maxSize:       1024,
+		allowUnknown:  false,
+	},
+	{
+		name:          "unknown field in json",
+		json:          `{"foooooo": "1"`,
+		errorExpected: true,
+		maxSize:       1024,
+		allowUnknown:  false,
+	},
+	{
+		name:          "allow unknown field in json",
+		json:          `{"foooooo": "1"}`,
+		errorExpected: false,
+		maxSize:       1024,
+		allowUnknown:  true,
+	},
+	{
+		name:          "missing field name",
+		json:          `{"jack": "1"}`,
+		errorExpected: false,
+		maxSize:       1024,
+		allowUnknown:  true,
+	},
+	{
+		name:          "file too large",
+		json:          `{"foo": "bar"}`,
+		errorExpected: true,
+		maxSize:       5,
+		allowUnknown:  true,
+	},
+	{
+		name:          "not json",
+		json:          `hello world`,
+		errorExpected: true,
+		maxSize:       1024,
+		allowUnknown:  true,
+	},
+}
+
+// ReadJSON tries to read the body of a request and converts from json int a go data variable
+func TestTools_ReadJSON(t *testing.T) {
+	var testTool Tools
+
+	for _, e := range jsonTests {
+		// set the max file size
+		testTool.MaxJSONSize = e.maxSize
+		testTool.AllowUnknownFields = e.allowUnknown
+		// variable to read the decoded json
+
+		var decodedJSON struct {
+			Foo string `json:"foo"`
+		}
+		req, err := http.NewRequest("POST", "/", bytes.NewReader([]byte(e.json)))
+		if err != nil {
+			t.Log("Error:", err)
+		}
+		rr := httptest.NewRecorder()
+		err = testTool.ReadJSON(rr, req, &decodedJSON)
+
+		if e.errorExpected && err == nil {
+			t.Errorf("expected an error but didn't get one")
+		}
+		if !e.errorExpected && err != nil {
+			t.Errorf("%s: error not expected, but one received : %s", e.name, err.Error())
+		}
+		req.Body.Close()
+
+	}
+}
+
+func TestTools_WriteJSON(t *testing.T) {
+	var testTool Tools
+	rr := httptest.NewRecorder()
+	payload := JSONResponse{
+		Error:   false,
+		Message: "foo",
+	}
+
+	headers := make(http.Header)
+	headers.Set("X-Foo", "Bar")
+
+	err := testTool.WriteJSON(rr, http.StatusOK, payload, headers)
+	if err != nil {
+		t.Errorf("failed to write json: %s", err.Error())
+	}
+}
+
+func TestTools_ErrorJSON(t *testing.T) {
+	var testTool Tools
+	rr := httptest.NewRecorder()
+	err := testTool.ErrorJSON(rr, errors.New("Some error"), http.StatusServiceUnavailable)
+	if err != nil {
+		t.Error(err)
+	}
+	var payload JSONResponse
+	decoder := json.NewDecoder(rr.Body)
+	err = decoder.Decode(&payload)
+	if err != nil {
+		t.Error("Received error when decoding", err)
+	}
+
+	if !payload.Error {
+		t.Error("Error should be true")
+	}
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("Handler returned wrong status code: got %v want %v",
+			rr.Code, http.StatusServiceUnavailable)
 	}
 
 }
